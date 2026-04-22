@@ -1,0 +1,106 @@
+# Values for the forge Keycloak umbrella chart.
+# Subchart names: `keycloakx` and `postgresql` — must match Chart.yaml.
+#
+# Architecture:
+#   - Keycloak (production mode, Quarkus) on 1 replica
+#   - PostgreSQL (bitnami subchart) with auto-generated DB password
+#   - Admin credentials pulled from Vault via ExternalSecret (templates/)
+#   - TLS terminated at ingress-nginx (Keycloak speaks plain HTTP inside)
+
+keycloakx:
+  # Explicit command forces production mode; default is `start-dev`.
+  # `--http-enabled=true` — plain HTTP inside the cluster, ingress-nginx does TLS.
+  # `--hostname-strict=false` — permits access through the ingress hostname.
+  # `--proxy-headers=forwarded` — trust X-Forwarded-* from ingress-nginx.
+  command:
+    - "/opt/keycloak/bin/kc.sh"
+    - "start"
+    - "--http-enabled=true"
+    - "--hostname-strict=false"
+    - "--proxy-headers=forwarded"
+
+  # Single replica — Keycloak supports HA clustering but needs jdbc-ping or
+  # similar. Bring up after Keycloak basic is green.
+  replicas: 1
+
+  # Bootstrap admin creds — env vars read from the ExternalSecret-managed Secret.
+  extraEnvFrom: |
+    - secretRef:
+        name: keycloak-admin
+
+  # Database — point at in-cluster PostgreSQL (bundled below)
+  database:
+    vendor: postgres
+    hostname: keycloak-postgresql
+    port: 5432
+    database: keycloak
+    username: keycloak
+    existingSecret: keycloak-postgresql     # bitnami chart creates this
+    existingSecretKey: password             # bitnami uses "password" key for non-admin user
+
+  # Ingress via ingress-nginx
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: HTTP
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    rules:
+      - host: keycloak.apps.mgmt-forge.engatwork.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []  # ingress-nginx default cert for now; cert-manager Certificate later
+
+  # Resources — Keycloak is JVM, starts around 500Mi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+  # Health probes — Keycloak Quarkus exposes /health/{ready,live}
+  livenessProbe: |
+    httpGet:
+      path: /health/live
+      port: http
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe: |
+    httpGet:
+      path: /health/ready
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# =============================================================================
+# PostgreSQL subchart (bitnami)
+# =============================================================================
+postgresql:
+  auth:
+    # bitnami chart auto-generates passwords. The Secret it creates
+    # (keycloak-postgresql) exposes them under keys:
+    #   - postgres-password (superuser)
+    #   - password          (non-admin user, used by Keycloak)
+    username: keycloak
+    database: keycloak
+
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: local-path
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

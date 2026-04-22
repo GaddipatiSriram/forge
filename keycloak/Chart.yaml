@@ -1,0 +1,16 @@
+apiVersion: v2
+name: keycloak-forge
+description: Umbrella chart — Keycloak (codecentric/keycloakx) + PostgreSQL (bitnami) for mgmt-forge
+type: application
+version: 0.1.0
+appVersion: "26.0.0"
+
+# keycloakx = Keycloak Quarkus distribution (modern, Keycloak 20+).
+# bundled bitnami/postgresql gives us a single-app-story; swap to CNPG later.
+dependencies:
+  - name: keycloakx
+    version: "2.6.0"
+    repository: https://codecentric.github.io/helm-charts
+  - name: postgresql
+    version: "16.1.2"
+    repository: https://charts.bitnami.com/bitnami
