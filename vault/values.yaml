@@ -1,0 +1,112 @@
+# Values for the forge Vault umbrella chart.
+# Everything under `vault:` is passed to the upstream hashicorp/vault chart
+# (subchart name must match dependency .name in Chart.yaml).
+#
+# Deployment model: HA with integrated Raft storage on 3 replicas.
+# Why Raft: zero external dependencies (no Consul/etcd), built-in, simple.
+# Each pod owns a PVC for its Raft state (10Gi on local-path SC).
+#
+# First-time bootstrap (once pods are Running):
+#   kubectl --context mgmt-forge exec -it -n vault vault-0 -- vault operator init
+# → returns 5 unseal keys + 1 root token. SAVE THESE — lose them, lose data.
+# Then unseal each pod (3 of 5 keys required per pod):
+#   kubectl --context mgmt-forge exec -it -n vault vault-0 -- vault operator unseal <key>
+#   (repeat for vault-1 and vault-2)
+#
+# Access:
+#   - UI:  https://vault.apps.mgmt-forge.engatwork.com  (via ingress-nginx)
+#   - API: same URL, token via -H "X-Vault-Token: <token>"
+
+vault:
+  global:
+    tlsDisable: true   # TLS terminated at ingress-nginx; internal pod-to-pod is cleartext
+                       # on the homelab VLAN. Tighten later with cert-manager + Vault mTLS.
+
+  server:
+    image:
+      repository: hashicorp/vault
+      tag: "1.18.1"
+
+    # HA with Raft — 3 replicas across forge nodes
+    ha:
+      enabled: true
+      replicas: 3
+      raft:
+        enabled: true
+        setNodeId: true
+        config: |
+          ui = true
+          listener "tcp" {
+            tls_disable = 1
+            address = "[::]:8200"
+            cluster_address = "[::]:8201"
+          }
+          storage "raft" {
+            path = "/vault/data"
+          }
+          service_registration "kubernetes" {}
+
+    # Pod anti-affinity keeps replicas on distinct nodes (HA across 3 forge workers)
+    affinity: |
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: {{ template "vault.name" . }}
+                app.kubernetes.io/instance: "{{ .Release.Name }}"
+                component: server
+            topologyKey: kubernetes.io/hostname
+
+    # Persistent storage for Raft state, per replica
+    dataStorage:
+      enabled: true
+      size: 10Gi
+      storageClass: local-path       # local-path-provisioner default SC on forge
+
+    # Audit storage — off for now; enable once Vault is bootstrapped
+    auditStorage:
+      enabled: false
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    # Ingress via ingress-nginx
+    ingress:
+      enabled: true
+      ingressClassName: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/backend-protocol: HTTP
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      hosts:
+        - host: vault.apps.mgmt-forge.engatwork.com
+          paths:
+            - /
+      # TLS via cert-manager Certificate (wave 2 — for now ingress-nginx's default
+      # self-signed cert serves; we'll add a cert-manager annotation later).
+      tls: []
+
+    # Readiness/liveness — Vault returns 429 when sealed, 200 when active.
+    # Use standby-ok so non-leaders also pass liveness.
+    readinessProbe:
+      enabled: true
+      path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
+    livenessProbe:
+      enabled: true
+      path: "/v1/sys/health?standbyok=true"
+      initialDelaySeconds: 60
+
+  # Injector: sidecar-based secret injection (annotation-driven). Useful later
+  # for pods that want secrets without ESO. Off by default to keep the footprint
+  # small; we'll flip to true if/when we need annotation-based injection.
+  injector:
+    enabled: false
+
+  # UI Service — ClusterIP; ingress handles external exposure above.
+  ui:
+    enabled: true
+    serviceType: ClusterIP

@@ -1,0 +1,13 @@
+apiVersion: v2
+name: vault-forge
+description: Umbrella chart wrapping hashicorp/vault for the mgmt-forge cluster
+type: application
+version: 0.1.0
+appVersion: "1.18.1"
+
+# Upstream chart from https://helm.releases.hashicorp.com
+# Version pin here — bump to upgrade Vault cluster-wide.
+dependencies:
+  - name: vault
+    version: "0.29.1"
+    repository: https://helm.releases.hashicorp.com
