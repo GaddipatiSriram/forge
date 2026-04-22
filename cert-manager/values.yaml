@@ -1,0 +1,42 @@
+# Values for the forge cert-manager umbrella chart.
+# Everything under `cert-manager:` is passed to the upstream jetstack chart
+# (subchart name must match dependency .name in Chart.yaml).
+
+cert-manager:
+  # Install CRDs (Certificate, Issuer, ClusterIssuer, etc.) with the chart.
+  # Separate CRD management (helm install with --skip-crds + raw CRD apply)
+  # is an enterprise pattern we can migrate to later.
+  installCRDs: true
+
+  replicaCount: 1
+
+  prometheus:
+    enabled: false        # flip to true once observability cluster is wired
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  webhook:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+  cainjector:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi

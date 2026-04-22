@@ -1,0 +1,14 @@
+apiVersion: v2
+name: cert-manager-forge
+description: Umbrella chart wrapping jetstack/cert-manager for the mgmt-forge cluster
+type: application
+version: 0.1.0
+appVersion: v1.16.1
+
+# ArgoCD's repo-server will run `helm dependency build` on this chart when
+# rendering, pulling the upstream cert-manager chart from jetstack's repo.
+# Version here is the pin — bump it to upgrade cert-manager cluster-wide.
+dependencies:
+  - name: cert-manager
+    version: v1.16.1
+    repository: https://charts.jetstack.io
