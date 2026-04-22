@@ -18,6 +18,10 @@ keycloakx:
     - "--http-enabled=true"
     - "--hostname-strict=false"
     - "--proxy-headers=forwarded"
+    # Single replica — use local cache instead of the default JGroups/Infinispan
+    # DNS_PING clustering (which needs sibling pods). Switch to --cache=ispn
+    # + --cache-stack=kubernetes once we move to HA >= 2 replicas.
+    - "--cache=local"
 
   # Single replica — Keycloak supports HA clustering but needs jdbc-ping or
   # similar. Bring up after Keycloak basic is green.
