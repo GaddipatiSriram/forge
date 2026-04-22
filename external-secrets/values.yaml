@@ -1,0 +1,55 @@
+# Values for the forge ESO umbrella chart.
+# Everything under `external-secrets:` is passed to the upstream chart
+# (subchart name must match dependency .name in Chart.yaml).
+
+external-secrets:
+  installCRDs: true
+
+  replicaCount: 1
+
+  # ServiceAccount name must match the one in Vault's auth role
+  # (auth/kubernetes/role/forge-reader bound_service_account_names=external-secrets)
+  serviceAccount:
+    create: true
+    name: external-secrets
+
+  # Controller resources — homelab footprint
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  webhook:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+  certController:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
+  # Metrics off for now (flip on once observability cluster is up)
+  metrics:
+    service:
+      enabled: false
+
+# Umbrella-chart toggles (not passed to subchart)
+forgeSmokeTest:
+  # Set to true to render an ExternalSecret in `default` namespace that pulls
+  # kv/forge/hello from Vault. Useful for verifying the ESO → Vault loop after
+  # initial deploy. Delete the value + re-sync once verified.
+  enabled: true
