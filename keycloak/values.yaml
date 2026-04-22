@@ -83,6 +83,14 @@ keycloakx:
 # PostgreSQL subchart (bitnami)
 # =============================================================================
 postgresql:
+  # Bitnami moved free images to `bitnamilegacy/` after putting `bitnami/` on a
+  # paid tier. The Helm chart still defaults to `bitnami/postgresql:<purged tag>`
+  # which 404s. Override to bitnamilegacy.
+  image:
+    registry: docker.io
+    repository: bitnamilegacy/postgresql
+    tag: "17.6.0-debian-12-r4"
+
   auth:
     # bitnami chart auto-generates passwords. The Secret it creates
     # (keycloak-postgresql) exposes them under keys:
