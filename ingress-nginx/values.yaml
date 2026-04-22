@@ -1,0 +1,56 @@
+# Values for the forge ingress-nginx umbrella chart.
+# Everything under `ingress-nginx:` is passed to the upstream chart
+# (subchart name must match dependency .name in Chart.yaml).
+
+ingress-nginx:
+  controller:
+    replicaCount: 1
+
+    # Expose via MetalLB — pin the VIP to 10.10.5.201 from forge's pool
+    # (10.10.5.200-220, defined in group_vars/mgmt_forge.yml).
+    # 10.10.5.200 is intentionally left for CoreDNS VIP parity with mgmt-core;
+    # 10.10.5.201 is the ingress entry point for all forge apps.
+    service:
+      type: LoadBalancer
+      annotations:
+        metallb.universe.tf/loadBalancerIPs: "10.10.5.201"
+      externalTrafficPolicy: Local
+
+    # Register as the default IngressClass for the cluster so Ingress objects
+    # without an explicit className get routed here.
+    ingressClassResource:
+      name: nginx
+      enabled: true
+      default: true
+    ingressClass: nginx
+
+    # Allow snippets in Ingress annotations (common for rewrite rules, CORS, etc.).
+    # OK for homelab; in prod some teams lock this down to avoid SSRF via user-supplied configs.
+    allowSnippetAnnotations: true
+
+    # Modest footprint for a homelab single-replica deployment.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+    # Admission webhook that validates Ingress manifests before apply.
+    # Keep on — catches misconfigured Ingresses early. cert-manager's cainjector
+    # will populate the caBundle (that's what cainjector does for you).
+    admissionWebhooks:
+      enabled: true
+
+    # Metrics off for now — flip to true once observability cluster is wired.
+    metrics:
+      enabled: false
+
+    # Autoscaling off; fixed 1 replica in homelab.
+    autoscaling:
+      enabled: false
+
+  # No default backend — 404 from nginx itself is fine for unknown hosts.
+  defaultBackend:
+    enabled: false
