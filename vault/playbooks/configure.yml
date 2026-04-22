@@ -1,0 +1,286 @@
+---
+# configure.yml - Post-install configuration for Vault on mgmt-forge
+#
+# Runs AFTER the Helm chart is synced by ArgoCD (Application vault-mgmt-forge).
+# Handles the imperative parts of Vault bootstrap that can't be pure GitOps:
+#   - init (one-shot, generates unseal keys + root token)
+#   - unseal (one-shot per pod life, needs keys)
+#   - enable KV v2 secrets engine
+#   - enable Kubernetes auth method + config
+#   - create policies + roles
+#   - (optional) seed smoke-test secrets
+#
+# Idempotent: everything except `init` can be safely re-run. `init` fails if
+# Vault is already initialized, which this playbook tolerates.
+#
+# Usage:
+#   # Full bootstrap (fresh Vault):
+#   ansible-playbook playbooks/configure.yml
+#
+#   # Just the configure step (already init'd + unsealed):
+#   ansible-playbook playbooks/configure.yml --tags configure
+#
+#   # Just seed smoke-test secrets:
+#   ansible-playbook playbooks/configure.yml --tags seed
+#
+#   # Override root token without the keys file:
+#   ansible-playbook playbooks/configure.yml --tags configure -e vault_root_token=hvs....
+#
+# Security note: the keys file is written to $HOME/.vault-keys-mgmt-forge.json
+# with mode 0600 and gitignored. Copy its contents to offline storage and
+# rm the file. Losing the 5 unseal keys = losing the Vault data.
+
+- name: Vault post-install configuration for mgmt-forge
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    vault_kubectl_context: mgmt-forge
+    vault_namespace: vault
+    vault_pods: [vault-0, vault-1, vault-2]
+    vault_leader_pod: vault-0
+    vault_raft_join_addr: "http://vault-0.vault-internal:8200"
+    vault_keys_file: "{{ lookup('env', 'HOME') }}/.vault-keys-mgmt-forge.json"
+
+    # Secrets engine
+    kv_mount: kv
+    kv_version: 2
+
+    # Kubernetes auth method
+    k8s_auth_mount: kubernetes
+    k8s_auth_host: "https://kubernetes.default.svc.cluster.local:443"
+
+    # Policies (HCL) — keyed by policy name
+    vault_policies:
+      forge-reader: |
+        path "kv/data/forge/*" { capabilities = ["read"] }
+        path "kv/metadata/forge/*" { capabilities = ["list", "read"] }
+
+    # Kubernetes auth roles
+    vault_roles:
+      - name: forge-reader
+        bound_sa_names: external-secrets
+        bound_sa_namespaces: external-secrets
+        policies: forge-reader
+        ttl: 1h
+
+    # Optional smoke-test secrets (only applied with --tags seed)
+    vault_seed_secrets:
+      - path: kv/forge/hello
+        kv:
+          message: "hello from vault"
+
+  tasks:
+    # =========================================================================
+    # INIT (tag: init) — generate 5 unseal keys + root token
+    # =========================================================================
+    - name: Check current seal status
+      ansible.builtin.command:
+        cmd: kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- vault status -format=json
+      register: seal_status
+      failed_when: false
+      changed_when: false
+      tags: [init, unseal, configure, seed, all]
+
+    - name: Parse seal status
+      ansible.builtin.set_fact:
+        vault_is_initialized: "{{ (seal_status.stdout | from_json).initialized | default(false) }}"
+        vault_is_sealed:      "{{ (seal_status.stdout | from_json).sealed | default(true) }}"
+      when: seal_status.stdout | length > 0
+      tags: [init, unseal, configure, seed, all]
+
+    - name: Initialize Vault (one-shot, saves keys to local file)
+      ansible.builtin.shell: |
+        kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} \
+          -- vault operator init -format=json
+      register: vault_init
+      when:
+        - not (vault_is_initialized | default(false))
+      no_log: true
+      tags: [init, all]
+
+    - name: Persist init output to keys file (mode 0600)
+      ansible.builtin.copy:
+        dest: "{{ vault_keys_file }}"
+        content: "{{ vault_init.stdout }}"
+        mode: '0600'
+      when: vault_init is defined and vault_init.stdout is defined
+      no_log: true
+      tags: [init, all]
+
+    - name: Warn about key custody
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Vault initialized. Keys saved to:"
+          - "  {{ vault_keys_file }}"
+          - ""
+          - "COPY THESE TO OFFLINE STORAGE NOW:"
+          - "  - 5 unseal keys (need any 3 to unseal)"
+          - "  - 1 root token"
+          - ""
+          - "After copying, delete the local file:"
+          - "  shred -u {{ vault_keys_file }}"
+          - "=============================================="
+      when: vault_init is defined and vault_init.stdout is defined
+      tags: [init, all]
+
+    # =========================================================================
+    # UNSEAL (tag: unseal) — uses keys from vault_keys_file
+    # =========================================================================
+    - name: Load unseal keys from file
+      ansible.builtin.set_fact:
+        vault_keys: "{{ (lookup('file', vault_keys_file) | from_json) }}"
+      when: vault_is_sealed | default(true)
+      no_log: true
+      tags: [unseal, all]
+
+    - name: Unseal vault-0 (leader)
+      ansible.builtin.command:
+        cmd: kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- vault operator unseal {{ item }}
+      loop: "{{ vault_keys.unseal_keys_b64[:vault_keys.unseal_threshold] }}"
+      when: vault_is_sealed | default(true)
+      changed_when: true
+      no_log: true
+      tags: [unseal, all]
+
+    - name: Raft join vault-1 and vault-2 to leader
+      ansible.builtin.command:
+        cmd: kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ item }} -- vault operator raft join {{ vault_raft_join_addr }}
+      loop: "{{ vault_pods | difference([vault_leader_pod]) }}"
+      when: vault_is_sealed | default(true)
+      failed_when: false
+      changed_when: true
+      tags: [unseal, all]
+
+    - name: Unseal vault-1 and vault-2
+      ansible.builtin.command:
+        cmd: kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ item.0 }} -- vault operator unseal {{ item.1 }}
+      loop: "{{ (vault_pods | difference([vault_leader_pod])) | product(vault_keys.unseal_keys_b64[:vault_keys.unseal_threshold]) | list }}"
+      when: vault_is_sealed | default(true)
+      changed_when: true
+      no_log: true
+      tags: [unseal, all]
+
+    # =========================================================================
+    # CONFIGURE (tag: configure) — KV, k8s auth, policies, roles
+    # =========================================================================
+    - name: Check if keys file exists (for root token fallback)
+      ansible.builtin.stat:
+        path: "{{ vault_keys_file }}"
+      register: vault_keys_stat
+      tags: [configure, seed, all]
+
+    - name: Resolve root token (from keys file if no -e override)
+      ansible.builtin.set_fact:
+        vault_root_token: "{{ (lookup('file', vault_keys_file) | from_json).root_token }}"
+      when:
+        - vault_root_token is not defined or vault_root_token | length == 0
+        - vault_keys_stat.stat.exists
+      no_log: true
+      tags: [configure, seed, all]
+
+    - name: Fail if no root token available
+      ansible.builtin.fail:
+        msg: "vault_root_token not set — either pass -e vault_root_token=hvs... or ensure {{ vault_keys_file }} exists"
+      when:
+        - vault_root_token is not defined or vault_root_token | length == 0
+      tags: [configure, seed, all]
+
+    - name: Enable KV v{{ kv_version }} secrets engine at {{ kv_mount }}/
+      ansible.builtin.shell: |
+        kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- \
+          sh -c "VAULT_TOKEN={{ vault_root_token }} vault secrets enable -path={{ kv_mount }} -version={{ kv_version }} kv"
+      register: kv_enable
+      failed_when:
+        - kv_enable.rc != 0
+        - "'path is already in use' not in kv_enable.stderr"
+      changed_when: "'Success' in kv_enable.stdout"
+      no_log: true
+      tags: [configure, all]
+
+    - name: Enable Kubernetes auth method at {{ k8s_auth_mount }}/
+      ansible.builtin.shell: |
+        kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- \
+          sh -c "VAULT_TOKEN={{ vault_root_token }} vault auth enable -path={{ k8s_auth_mount }} kubernetes"
+      register: auth_enable
+      failed_when:
+        - auth_enable.rc != 0
+        - "'path is already in use' not in auth_enable.stderr"
+      changed_when: "'Success' in auth_enable.stdout"
+      no_log: true
+      tags: [configure, all]
+
+    - name: Configure Kubernetes auth method (host)
+      ansible.builtin.shell: |
+        kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- \
+          sh -c "VAULT_TOKEN={{ vault_root_token }} vault write auth/{{ k8s_auth_mount }}/config kubernetes_host={{ k8s_auth_host }}"
+      register: auth_config
+      changed_when: "'Success' in auth_config.stdout"
+      no_log: true
+      tags: [configure, all]
+
+    - name: Write Vault policies
+      ansible.builtin.shell:
+        cmd: |
+          kubectl --context {{ vault_kubectl_context }} exec -i -n {{ vault_namespace }} {{ vault_leader_pod }} -- \
+            sh -c 'VAULT_TOKEN={{ vault_root_token }} vault policy write {{ item.key }} -'
+        stdin: "{{ item.value }}"
+      loop: "{{ vault_policies | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: policy_write
+      changed_when: "'Success' in policy_write.stdout"
+      no_log: true
+      tags: [configure, all]
+
+    - name: Create Kubernetes auth roles
+      ansible.builtin.shell: |
+        kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- \
+          sh -c "VAULT_TOKEN={{ vault_root_token }} vault write auth/{{ k8s_auth_mount }}/role/{{ item.name }} \
+            bound_service_account_names={{ item.bound_sa_names }} \
+            bound_service_account_namespaces={{ item.bound_sa_namespaces }} \
+            policies={{ item.policies }} \
+            ttl={{ item.ttl }}"
+      loop: "{{ vault_roles }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: role_write
+      changed_when: "'Success' in role_write.stdout"
+      no_log: true
+      tags: [configure, all]
+
+    # =========================================================================
+    # SEED (tag: seed) — optional smoke-test secrets
+    # =========================================================================
+    - name: Seed KV smoke-test secrets
+      ansible.builtin.shell: |
+        kubectl --context {{ vault_kubectl_context }} exec -n {{ vault_namespace }} {{ vault_leader_pod }} -- \
+          sh -c "VAULT_TOKEN={{ vault_root_token }} vault kv put {{ item.path }} {{ item.kv | dict2items | map(attribute='key') | zip(item.kv | dict2items | map(attribute='value')) | map('join','=') | join(' ') }}"
+      loop: "{{ vault_seed_secrets }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: seed_write
+      changed_when: "'created_time' in seed_write.stdout"
+      no_log: true
+      tags: [seed]
+
+    # =========================================================================
+    # Summary
+    # =========================================================================
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "Vault post-install config complete"
+          - "=============================================="
+          - "KV v{{ kv_version }} mount:        {{ kv_mount }}/"
+          - "Kubernetes auth mount:  {{ k8s_auth_mount }}/ → {{ k8s_auth_host }}"
+          - "Policies:               {{ vault_policies.keys() | list | join(', ') }}"
+          - "Roles:                  {{ vault_roles | map(attribute='name') | list | join(', ') }}"
+          - ""
+          - "Test with:"
+          - "  kubectl --context mgmt-forge exec -n vault vault-0 -- sh -c 'VAULT_TOKEN=<root> vault kv get kv/forge/hello'"
+          - "=============================================="
+      tags: [configure, seed, all]
