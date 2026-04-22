@@ -46,16 +46,20 @@ vault:
           }
           service_registration "kubernetes" {}
 
-    # Pod anti-affinity keeps replicas on distinct nodes (HA across 3 forge workers)
+    # Pod anti-affinity: prefer distinct nodes, but allow two replicas on the
+    # same node if needed (3-replica Raft on a 2-worker cluster — CP is tainted).
+    # Switch to requiredDuringScheduling once you have >=3 schedulable nodes.
     affinity: |
       podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchLabels:
-                app.kubernetes.io/name: {{ template "vault.name" . }}
-                app.kubernetes.io/instance: "{{ .Release.Name }}"
-                component: server
-            topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ template "vault.name" . }}
+                  app.kubernetes.io/instance: "{{ .Release.Name }}"
+                  component: server
+              topologyKey: kubernetes.io/hostname
 
     # Persistent storage for Raft state, per replica
     dataStorage:
@@ -92,12 +96,15 @@ vault:
 
     # Readiness/liveness — Vault returns 429 when sealed, 200 when active.
     # Use standby-ok so non-leaders also pass liveness.
+    # Probes have to tolerate pre-init state (501) and sealed state (503), or
+    # the pod crashloops during bootstrap. Returning 204 for both keeps the pod
+    # alive through `vault operator init` + the unseal ceremony.
     readinessProbe:
       enabled: true
       path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
     livenessProbe:
       enabled: true
-      path: "/v1/sys/health?standbyok=true"
+      path: "/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204"
       initialDelaySeconds: 60
 
   # Injector: sidecar-based secret injection (annotation-driven). Useful later
