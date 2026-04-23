@@ -39,11 +39,11 @@ jenkins:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: false
 
-    # Chart 5.8.1 ships plugin defaults that require Jenkins >= 2.492.1, but
-    # its default image tag is 2.479.2 (and `lts-jdk17` currently resolves to
-    # 2.479.3). Pin an explicit LTS patch that is newer than both.
+    # Chart 5.9.18 ships plugin defaults that require Jenkins >= 2.541.1.
+    # Pin explicitly so chart<->plugins<->image stay consistent; the `lts-jdk17`
+    # tag drifts to whatever the Jenkins project currently calls LTS.
     image:
-      tag: "2.492.2-jdk17"
+      tag: "2.541.1-jdk17"
 
     serviceType: ClusterIP
 
