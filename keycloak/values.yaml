@@ -22,6 +22,10 @@ keycloakx:
     # DNS_PING clustering (which needs sibling pods). Switch to --cache=ispn
     # + --cache-stack=kubernetes once we move to HA >= 2 replicas.
     - "--cache=local"
+    # Expose /health/{live,ready,started} on the management interface (:9000).
+    # Required for the probes in this chart (disabled by default in 25+).
+    - "--health-enabled=true"
+    - "--metrics-enabled=true"
 
   # Single replica — Keycloak supports HA clustering but needs jdbc-ping or
   # similar. Bring up after Keycloak basic is green.
