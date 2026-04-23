@@ -73,25 +73,26 @@ keycloakx:
       memory: 1Gi
 
   # Keycloak 25+ serves health on the management interface (port 9000), not the
-  # main HTTP port (8080). Probes must hit 9000/health/{live,ready}.
+  # main HTTP port (8080). KC_HTTP_RELATIVE_PATH=/auth prefixes BOTH ports, so
+  # probes must hit /auth/health/* — /health/* returns 404 on :9000.
   # startupProbe absorbs the long JVM + Quarkus augmentation boot (up to 5 min).
   livenessProbe: |
     httpGet:
-      path: /health/live
+      path: /auth/health/live
       port: 9000
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
   readinessProbe: |
     httpGet:
-      path: /health/ready
+      path: /auth/health/ready
       port: 9000
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
   startupProbe: |
     httpGet:
-      path: /health/started
+      path: /auth/health/started
       port: 9000
     initialDelaySeconds: 30
     periodSeconds: 10
