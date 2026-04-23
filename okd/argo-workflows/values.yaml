@@ -8,8 +8,14 @@
 #   - authMode=server for bootstrap; switch to SSO once Keycloak OIDC client lands
 
 argo-workflows:
-  # CRDs installed out-of-band (cluster-scoped; argocd-sre is namespace-scoped
-  # and cannot manage cluster resources). Renew via:
+  # argocd-sre is namespace-scoped — it cannot manage any cluster-scoped
+  # resources (CRDs, ClusterRoles, ClusterRoleBindings). Switch the chart to
+  # single-namespace mode which:
+  #   - Uses Role/RoleBinding instead of ClusterRole/ClusterRoleBinding
+  #   - Disables ClusterWorkflowTemplate support
+  singleNamespace: true
+
+  # CRDs installed out-of-band (cluster-scoped). Renew via:
   #   helm pull argo/argo-workflows --version <v> --untar
   #   helm template dummy ./argo-workflows --set crds.install=true 2>&1 | \
   #     awk 'BEGIN{p=0} /^# Source:.*\/crds\//{p=1;print "---";next} /^# Source:/{p=0} p{print}' \
@@ -22,9 +28,15 @@ argo-workflows:
     # install namespace for now; expand to a list once we have cross-ns workflows.
     workflowNamespaces:
       - argo-workflows
+    # Disable cluster-scoped CRD watcher; single-namespace mode only reconciles
+    # Workflow/CronWorkflow/WorkflowTemplate in-namespace.
+    clusterWorkflowTemplates:
+      enabled: false
 
   server:
     enabled: true
+    clusterWorkflowTemplates:
+      enabled: false
     # server: requires a K8s bearer token to access the UI/API. Simpler than
     # hybrid/sso for bootstrap. Flip to `sso` after wiring the Keycloak OIDC
     # client in the forge realm.
