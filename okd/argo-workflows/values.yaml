@@ -8,11 +8,14 @@
 #   - authMode=server for bootstrap; switch to SSO once Keycloak OIDC client lands
 
 argo-workflows:
-  # CRDs managed by the chart itself. Argo will not prune these on app delete
-  # (keep:true) — avoids nuking workflow history if we ever delete the App.
+  # CRDs installed out-of-band (cluster-scoped; argocd-sre is namespace-scoped
+  # and cannot manage cluster resources). Renew via:
+  #   helm pull argo/argo-workflows --version <v> --untar
+  #   helm template dummy ./argo-workflows --set crds.install=true 2>&1 | \
+  #     awk 'BEGIN{p=0} /^# Source:.*\/crds\//{p=1;print "---";next} /^# Source:/{p=0} p{print}' \
+  #     | kubectl --context admin apply -f -
   crds:
-    install: true
-    keep: true
+    install: false
 
   controller:
     # Namespaces whose Workflow CRs this controller reconciles. Scoped to the
