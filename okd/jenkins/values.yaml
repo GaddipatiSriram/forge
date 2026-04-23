@@ -81,13 +81,16 @@ jenkins:
     enabled: true
 
   persistence:
-    # TEMPORARY: persistence disabled because both rook-ceph-external
-    # provisioners (ceph-rbd, cephfs) are timing out on volume creation
-    # against the central Ceph cluster. Jenkins home will live on emptyDir
-    # and not survive pod restarts — fine for learning, NOT for real use.
-    # Re-enable with storageClass: cephfs (or ceph-rbd) once the Ceph
-    # external connectivity/auth issue is resolved.
-    enabled: false
+    # INTERIM: using local-path until rook-ceph-external issue #1 is fixed
+    # (OSDs advertise pod IPs unreachable from external consumers — see
+    # storage/rook-ceph/README.md). local-path pins the PV to the node
+    # that first scheduled the pod, so a node drain loses the data — fine
+    # for a single-node-tolerant Jenkins, NOT for real multi-node HA.
+    # Switch back to ceph-rbd (or cephfs) when issue #1 closes.
+    enabled: true
+    storageClass: local-path
+    size: 20Gi
+    accessMode: ReadWriteOnce
 
   serviceAccount:
     create: true
