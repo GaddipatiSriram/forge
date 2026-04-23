@@ -81,15 +81,15 @@ jenkins:
     enabled: true
 
   persistence:
-    # Persistence disabled. Both storage paths are broken on OKD right now:
-    #   - ceph-rbd / cephfs → central Rook-Ceph OSDs advertise pod IPs
-    #     (see storage/rook-ceph/README.md #1).
-    #   - local-path → provisioner helper pod gets "Permission denied" at
-    #     /opt/local-path-provisioner on SCOS (immutable /opt). Would need
-    #     the ConfigMap repointed at a writable path under /var, plus SCC
-    #     tweaks. Not solved yet (see storage/rook-ceph/README.md #3).
-    # Jenkins therefore runs on emptyDir — jobs/config lost on pod restart.
-    enabled: false
+    # ceph-rbd: RWO block volume from the central Rook-Ceph cluster on
+    # mgmt-storage. See storage/rook-ceph/README.md for the issue log.
+    # Issue #1 (OSDs advertising pod IPs) was closed by adding
+    # network.addressRanges.public/cluster = 10.10.4.0/24 to the central
+    # CephCluster and bouncing osd.0 + osd.1 to re-register with host IPs.
+    enabled: true
+    storageClass: ceph-rbd
+    size: 20Gi
+    accessMode: ReadWriteOnce
 
   serviceAccount:
     create: true
