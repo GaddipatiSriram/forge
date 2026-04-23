@@ -39,11 +39,12 @@ jenkins:
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: false
 
-    # Chart 5.8.1 defaults to jenkins:2.479.2, but its pinned default plugins
-    # require 2.479.3+. Bump to the matching LTS to avoid "requires a greater
-    # version of Jenkins" errors during init plugin install.
+    # Chart 5.8.1 defaults to jenkins:2.479.2, whose default plugin versions
+    # require 2.479.3+ — but that tag doesn't exist (Jenkins jumped to 2.492).
+    # Using lts-jdk17 to always pull current LTS. Pin a specific tag before
+    # moving to real workloads so rollouts are deterministic.
     image:
-      tag: "2.479.3-jdk17"
+      tag: "lts-jdk17"
 
     serviceType: ClusterIP
 
