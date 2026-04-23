@@ -35,7 +35,6 @@ jenkins:
           - ALL
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: false
-    securityContextCapabilities: null
 
     serviceType: ClusterIP
 
@@ -49,9 +48,10 @@ jenkins:
     # Admin creds: chart generates random password on first install, stored
     # in Secret/jenkins. Retrieve via:
     #   kubectl -n jenkins get secret jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d
-    # Migrate to Vault later by setting adminSecret: false and mounting a
-    # Vault-backed Secret via ESO.
-    adminSecret: true
+    # Migrate to Vault later by setting admin.createSecret: false and mounting
+    # a Vault-backed Secret via ESO.
+    admin:
+      createSecret: true
 
     # Plugins pre-installed. Conservative starter set — add more via JCasC
     # later. Pin versions so Helm re-renders are deterministic.
