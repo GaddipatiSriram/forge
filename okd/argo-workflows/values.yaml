@@ -1,0 +1,53 @@
+# Values for the Argo Workflows umbrella chart on OKD.
+# Subchart name: `argo-workflows` — must match Chart.yaml dependency.
+#
+# Architecture:
+#   - Workflow controller + server running in `argo-workflows` namespace on OKD
+#   - UI at https://workflows.apps.mgmt-devops-okd.engatwork.com (OKD ingress)
+#   - No artifact repository yet (add MinIO or rook-ceph-external RGW later)
+#   - authMode=server for bootstrap; switch to SSO once Keycloak OIDC client lands
+
+argo-workflows:
+  # CRDs managed by the chart itself. Argo will not prune these on app delete
+  # (keep:true) — avoids nuking workflow history if we ever delete the App.
+  crds:
+    install: true
+    keep: true
+
+  controller:
+    # Namespaces whose Workflow CRs this controller reconciles. Scoped to the
+    # install namespace for now; expand to a list once we have cross-ns workflows.
+    workflowNamespaces:
+      - argo-workflows
+
+  server:
+    enabled: true
+    # server: requires a K8s bearer token to access the UI/API. Simpler than
+    # hybrid/sso for bootstrap. Flip to `sso` after wiring the Keycloak OIDC
+    # client in the forge realm.
+    authModes:
+      - server
+    serviceType: ClusterIP
+
+    # OKD: Ingress resources are auto-converted to Routes by the ingress
+    # operator. route.openshift.io/termination=edge terminates TLS at the
+    # router using the cluster's wildcard cert — no cert-manager cert needed
+    # for *.apps.mgmt-devops-okd.engatwork.com.
+    ingress:
+      enabled: true
+      ingressClassName: openshift-default
+      annotations:
+        route.openshift.io/termination: edge
+      hosts:
+        - workflows.apps.mgmt-devops-okd.engatwork.com
+      paths:
+        - /
+      pathType: Prefix
+
+  # Default SA for step pods. Workflows submitted by users will need their
+  # own SA (or this one) granted SCC permissions to spawn pods. Not solved
+  # here — flagged in QA.md.
+  workflow:
+    serviceAccount:
+      create: true
+      name: argo-workflow

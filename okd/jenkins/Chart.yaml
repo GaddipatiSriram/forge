@@ -1,0 +1,11 @@
+apiVersion: v2
+name: jenkins-okd
+description: Jenkins on OKD (argocd-sre / in-cluster) — official jenkinsci Helm chart
+type: application
+version: 0.1.0
+appVersion: "LTS"
+
+dependencies:
+  - name: jenkins
+    version: "5.8.1"
+    repository: https://charts.jenkins.io

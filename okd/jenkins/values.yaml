@@ -1,0 +1,87 @@
+# Values for the Jenkins umbrella chart on OKD.
+# Subchart name: `jenkins` — must match Chart.yaml dependency.
+#
+# Architecture:
+#   - Single controller pod (StatefulSet) with 20Gi ceph-rbd PVC
+#   - UI at https://jenkins.apps.mgmt-devops-okd.engatwork.com
+#   - Admin creds chart-generated; migrate to Vault/ESO later (same pattern
+#     as forge/keycloak)
+#
+# === GOTCHAS for OKD ===
+# 1. runAsUser: null — OKD's restricted-v2 SCC forbids fixed UIDs. Letting
+#    OKD assign a UID from the project's SCC range is the simplest fix.
+#    If the chart still fails on SCC, grant the jenkins SA the
+#    `nonroot-v2` SCC:  oc adm policy add-scc-to-user nonroot-v2 -z jenkins -n jenkins
+# 2. Ingress → Route auto-conversion: OKD's ingress-operator wraps any
+#    Ingress as a Route. `route.openshift.io/termination: edge` tells it to
+#    terminate TLS at the router with the cluster wildcard cert.
+# 3. Storage: ceph-rbd is RWO + durable. Do NOT use local-path — the
+#    previous standalone install (now deleted) got stuck with PVC Pending
+#    because local-path's WaitForFirstConsumer + the pod's stuck state
+#    deadlocked each other.
+
+jenkins:
+  controller:
+    # Let OKD SCC pick the UID/GID from the project's allocated range.
+    runAsUser: null
+    fsGroup: null
+
+    # Disable the chart's default capability tweaks that OKD SCCs reject.
+    containerSecurityContext:
+      runAsUser: null
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: false
+    securityContextCapabilities: null
+
+    serviceType: ClusterIP
+
+    ingress:
+      enabled: true
+      ingressClassName: openshift-default
+      hostName: jenkins.apps.mgmt-devops-okd.engatwork.com
+      annotations:
+        route.openshift.io/termination: edge
+
+    # Admin creds: chart generates random password on first install, stored
+    # in Secret/jenkins. Retrieve via:
+    #   kubectl -n jenkins get secret jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d
+    # Migrate to Vault later by setting adminSecret: false and mounting a
+    # Vault-backed Secret via ESO.
+    adminSecret: true
+
+    # Plugins pre-installed. Conservative starter set — add more via JCasC
+    # later. Pin versions so Helm re-renders are deterministic.
+    installPlugins:
+      - kubernetes:4296.v20a_8f96b_b_b_fa_
+      - workflow-aggregator:600.vb_57cdd26fdd7
+      - git:5.3.0
+      - configuration-as-code:1836.vccda_4a_122a_a_e
+      - job-dsl:1.87
+      - credentials-binding:681.vf91669a_32e45
+
+    # Resource requests — small; bump once we know real workload shape.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
+
+  # Agent pods (dynamic, kubernetes plugin). Defaults work on OKD.
+  agent:
+    enabled: true
+
+  persistence:
+    enabled: true
+    storageClass: ceph-rbd
+    size: 20Gi
+    accessMode: ReadWriteOnce
+
+  serviceAccount:
+    create: true
+    name: jenkins
