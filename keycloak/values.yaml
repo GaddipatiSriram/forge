@@ -36,15 +36,18 @@ keycloakx:
     - secretRef:
         name: keycloak-admin
 
-  # Database — point at in-cluster PostgreSQL (bundled below)
+  # Database — point at in-cluster PostgreSQL (bundled below).
+  # Reads DB password from Secret/keycloak-db-creds (materialized from Vault
+  # by templates/db-externalsecret.yaml). Using a Vault-sourced Secret avoids
+  # bitnami's chart re-rendering new random passwords on every Helm sync.
   database:
     vendor: postgres
     hostname: keycloak-postgresql
     port: 5432
     database: keycloak
     username: keycloak
-    existingSecret: keycloak-postgresql     # bitnami chart creates this
-    existingSecretKey: password             # bitnami uses "password" key for non-admin user
+    existingSecret: keycloak-db-creds
+    existingSecretKey: password
 
   # Ingress via ingress-nginx
   ingress:
@@ -108,10 +111,12 @@ postgresql:
     tag: "17.6.0-debian-12-r4"
 
   auth:
-    # bitnami chart auto-generates passwords. The Secret it creates
-    # (keycloak-postgresql) exposes them under keys:
-    #   - postgres-password (superuser)
-    #   - password          (non-admin user, used by Keycloak)
+    # Point the subchart at our Vault-managed Secret so it NEVER rotates
+    # the password on Helm re-render. Keys must be "password" + "postgres-password".
+    existingSecret: keycloak-db-creds
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
     username: keycloak
     database: keycloak
 
