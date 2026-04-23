@@ -77,14 +77,13 @@ jenkins:
     enabled: true
 
   persistence:
-    enabled: true
-    # Using cephfs (default SC) instead of ceph-rbd. The ceph-rbd provisioner
-    # was stuck on a stale PVC (default/ceph-fresh-rwo) with 800+ retries,
-    # causing "DeadlineExceeded / operation already exists" loops. CephFS is
-    # fine for Jenkins — single writer pod, RWX not needed but harmless.
-    storageClass: cephfs
-    size: 20Gi
-    accessMode: ReadWriteOnce
+    # TEMPORARY: persistence disabled because both rook-ceph-external
+    # provisioners (ceph-rbd, cephfs) are timing out on volume creation
+    # against the central Ceph cluster. Jenkins home will live on emptyDir
+    # and not survive pod restarts — fine for learning, NOT for real use.
+    # Re-enable with storageClass: cephfs (or ceph-rbd) once the Ceph
+    # external connectivity/auth issue is resolved.
+    enabled: false
 
   serviceAccount:
     create: true
