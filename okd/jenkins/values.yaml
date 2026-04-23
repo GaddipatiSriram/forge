@@ -56,15 +56,10 @@ jenkins:
     admin:
       createSecret: true
 
-    # Plugins pre-installed. Conservative starter set — add more via JCasC
-    # later. Pin versions so Helm re-renders are deterministic.
-    installPlugins:
-      - kubernetes:4296.v20a_8f96b_b_b_fa_
-      - workflow-aggregator:600.vb_57cdd26fdd7
-      - git:5.3.0
-      - configuration-as-code:1836.vccda_4a_122a_a_e
-      - job-dsl:1.87
-      - credentials-binding:681.vf91669a_32e45
+    # Plugin list omitted — chart default set is coherent with the default
+    # image tag. Pinning plugins without also pinning a matching core version
+    # caused "plugin requires Jenkins X.Y.Z" errors on first boot. Re-pin
+    # AFTER we pin controller.image.tag to a specific LTS.
 
     # Resource requests — small; bump once we know real workload shape.
     resources:
