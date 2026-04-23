@@ -26,10 +26,13 @@ jenkins:
     runAsUser: null
     fsGroup: null
 
-    # Disable the chart's default capability tweaks that OKD SCCs reject.
+    # OKD SCCs enforce non-root policy themselves. runAsUser: null lets OKD
+    # assign a UID from the SCC range. Do NOT set runAsNonRoot: true — it
+    # clashes with the chart's init container that needs UID 0 to chown
+    # /var/jenkins_home on first start (anyuid SCC granted to the jenkins SA
+    # permits that).
     containerSecurityContext:
       runAsUser: null
-      runAsNonRoot: true
       capabilities:
         drop:
           - ALL
