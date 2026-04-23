@@ -3,15 +3,50 @@
 #
 # Architecture:
 #   - Keycloak (production mode, Quarkus) on 1 replica
-#   - PostgreSQL (bitnami subchart) with auto-generated DB password
+#   - PostgreSQL (bitnami subchart), DB creds from Vault via ESO
 #   - Admin credentials pulled from Vault via ExternalSecret (templates/)
 #   - TLS terminated at ingress-nginx (Keycloak speaks plain HTTP inside)
+#
+# === GOTCHAS (hard-won, keep before bumping the Keycloak image) ==============
+#
+# 1. Bootstrap admin env var names are version-dependent.
+#    - Keycloak 25.x reads  KEYCLOAK_ADMIN / KEYCLOAK_ADMIN_PASSWORD.
+#    - Keycloak 26+  reads  KC_BOOTSTRAP_ADMIN_USERNAME / _PASSWORD.
+#    If the wrong names are set, Keycloak silently ignores them — the master
+#    realm boots with no admin user and the UI shows "You will need local
+#    access to create the administrative user."
+#    Current state: running 25.x. templates/admin-externalsecret.yaml remaps
+#    the Vault keys (stored under the KC_BOOTSTRAP_ADMIN_* names) to the
+#    KEYCLOAK_ADMIN* env vars. When bumping to 26+, drop the remap.
+#
+# 2. --proxy-headers=forwarded vs xforwarded.
+#    ingress-nginx sends X-Forwarded-Proto / X-Forwarded-Host / X-Forwarded-For
+#    (default), NOT the RFC 7239 `Forwarded:` header. Pass
+#    `--proxy-headers=xforwarded` to Keycloak. With `forwarded`, Keycloak
+#    doesn't see TLS termination and advertises http:// in OIDC issuer URLs,
+#    which breaks the admin console ("Danger alert: somethingWentWrong").
+#
+# 3. KC_HTTP_RELATIVE_PATH prefixes the management port (:9000) too.
+#    With KC_HTTP_RELATIVE_PATH=/auth, /health/* on :9000 returns 404. Probes
+#    must hit /auth/health/{live,ready,started}.
+#
+# 4. DB Secret name must match what the pod actually mounts.
+#    keycloakx.database.existingSecret points the Keycloak StatefulSet at a
+#    pre-existing Secret (keycloak-db-creds, materialized from Vault by
+#    templates/db-externalsecret.yaml). This avoids the bitnami/postgresql
+#    subchart rotating a fresh random password on every Helm re-render.
+#    Both subcharts must reference the SAME Secret (see postgresql.auth.*).
+#
+# 5. bitnami/postgresql image tag.
+#    Bitnami moved free images to `bitnamilegacy/*`. The chart's default
+#    `bitnami/postgresql:<tag>` 404s. Override image.repository accordingly.
+#
+# =============================================================================
 
 keycloakx:
   # Explicit command forces production mode; default is `start-dev`.
   # `--http-enabled=true` — plain HTTP inside the cluster, ingress-nginx does TLS.
   # `--hostname-strict=false` — permits access through the ingress hostname.
-  # `--proxy-headers=forwarded` — trust X-Forwarded-* from ingress-nginx.
   command:
     - "/opt/keycloak/bin/kc.sh"
     - "start"
