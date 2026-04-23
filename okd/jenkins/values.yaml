@@ -78,7 +78,11 @@ jenkins:
 
   persistence:
     enabled: true
-    storageClass: ceph-rbd
+    # Using cephfs (default SC) instead of ceph-rbd. The ceph-rbd provisioner
+    # was stuck on a stale PVC (default/ceph-fresh-rwo) with 800+ retries,
+    # causing "DeadlineExceeded / operation already exists" loops. CephFS is
+    # fine for Jenkins — single writer pod, RWX not needed but harmless.
+    storageClass: cephfs
     size: 20Gi
     accessMode: ReadWriteOnce
 
