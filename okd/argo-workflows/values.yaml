@@ -15,6 +15,11 @@ argo-workflows:
   #   - Disables ClusterWorkflowTemplate support
   singleNamespace: true
 
+  # Skip aggregate ClusterRoles (view/edit/admin extensions for Workflow CRs).
+  # They're cluster-scoped, and nice-to-have only. Can re-enable once we move
+  # to a cluster-scoped ArgoCD install.
+  createAggregateRoles: false
+
   # CRDs installed out-of-band (cluster-scoped). Renew via:
   #   helm pull argo/argo-workflows --version <v> --untar
   #   helm template dummy ./argo-workflows --set crds.install=true 2>&1 | \
