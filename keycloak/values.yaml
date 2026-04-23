@@ -17,7 +17,10 @@ keycloakx:
     - "start"
     - "--http-enabled=true"
     - "--hostname-strict=false"
-    - "--proxy-headers=forwarded"
+    # ingress-nginx sends X-Forwarded-* (not RFC 7239 Forwarded:), so use
+    # xforwarded. With `forwarded`, Keycloak misses TLS termination and
+    # advertises http:// in OIDC issuer URLs.
+    - "--proxy-headers=xforwarded"
     # Single replica — use local cache instead of the default JGroups/Infinispan
     # DNS_PING clustering (which needs sibling pods). Switch to --cache=ispn
     # + --cache-stack=kubernetes once we move to HA >= 2 replicas.
