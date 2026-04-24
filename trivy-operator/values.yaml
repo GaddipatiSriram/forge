@@ -1,0 +1,71 @@
+# Values for the trivy-operator umbrella chart.
+# Subchart name: `trivy-operator` — must match Chart.yaml dependency.
+#
+# Upstream defaults are mostly fine for a homelab. We only override what
+# needs to change for our environment.
+
+trivy-operator:
+  # -- Namespaces the operator scans. Empty = all namespaces. We exclude
+  # the k8s control-plane ones (noisy, nothing we can do about findings
+  # anyway, and they already ship with their own hardening).
+  targetNamespaces: ""
+  excludeNamespaces: "kube-system,kube-public,kube-node-lease,openshift-*"
+
+  # -- Which report kinds to produce. We enable everything except the
+  # cluster-wide compliance scans (they add 4 CRs on install and spam
+  # the cluster without delivering much value at this stage).
+  operator:
+    vulnerabilityScannerEnabled: true
+    configAuditScannerEnabled: true
+    exposedSecretScannerEnabled: true
+    infraAssessmentScannerEnabled: true
+    rbacAssessmentScannerEnabled: true
+    clusterComplianceEnabled: false
+
+    # -- Stagger scans; default is 0s (all pods scanned at once on boot).
+    scannerReportTTL: 24h
+    scanJobTimeout: 5m
+
+    # -- Resource limits on the operator itself. Default requests are 0;
+    # on a shared cluster that's not polite.
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+  # -- Compliance specs (CIS, NSA, PSS, etc.) generate ClusterComplianceReport
+  # CRs at install time regardless of the operator's scanner flag. Empty
+  # list = no compliance CRs at all. Re-enable selectively later once we
+  # have someone to look at the reports.
+  compliance:
+    specs: []
+
+  # -- Pull Trivy's vuln DB through the default public mirror. For air-gapped
+  # or high-traffic clusters you'd point this at your own OCI mirror (e.g. on
+  # Harbor once we have it).
+  trivy:
+    dbRegistry: "public.ecr.aws"
+    dbRepository: "aquasecurity/trivy-db"
+    javaDbRegistry: "public.ecr.aws"
+    javaDbRepository: "aquasecurity/trivy-java-db"
+
+    # -- Scan severity floor. Default is UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL.
+    # Homelab — just log the ones that matter. Tune up later.
+    severity: "HIGH,CRITICAL"
+
+    # -- Trivy scan job resources (one job per workload, ephemeral).
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi
+      limits:
+        cpu: 500m
+        memory: 500Mi
+
+  # -- Service Monitor for Prometheus. Off until we have an observability
+  # stack to consume it. Flip to true when mgmt-observability is up.
+  serviceMonitor:
+    enabled: false
