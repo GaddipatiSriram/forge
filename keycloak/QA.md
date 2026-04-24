@@ -296,3 +296,151 @@ but you can't debug it and you can't design for it.
 - **jose.readthedocs.io** — deeper dive into JWT signing/encryption.
 - Auth0 blog and Okta developer blog — both have high-quality explainers
   on specific concepts (search by topic).
+
+---
+
+## Q11. When wiring an app (e.g. ArgoCD) to Keycloak as an OIDC client, the client secret has to land in two places: inside Keycloak's client config AND as a k8s Secret the consuming app references. What's the clean way to automate that?
+
+**A.** Short answer: the clean answer is **"both sides read the secret from a single source of truth"** — typically HashiCorp Vault, consumed via External Secrets Operator (ESO) on each side. The manual `kubectl create secret` approach is fine for a demo but creates drift (two copies, no rotation story).
+
+Five patterns teams actually use, in order of how often you see them:
+
+### Pattern 1 — keycloak-config-cli + Vault + ESO (most common in mature k8s orgs)
+
+```
+  Vault: kv/forge/oidc/argocd-sre/clientSecret = <random 32-byte hex>
+         │                                       │
+   ExternalSecret                         ExternalSecret
+   (mgmt-forge, keycloak ns)              (OKD, argocd-sre ns)
+         │                                       │
+         ▼                                       ▼
+   k8s Secret mounted as                 k8s Secret referenced by
+   env into keycloak-config-cli          ArgoCD CR's oidcConfig via
+   Job (imports realm YAML with          `$argocd-sre-oidc-secret:clientSecret`
+   `clientSecret: "$(env:...)"`)         syntax
+```
+
+Realm config lives in Git at `forge/keycloak/realms/forge.yaml` (declarative
+YAML or JSON — the "infra as code" for SSO). The client secret is a
+placeholder `$(env:SECRET_NAME)` that keycloak-config-cli substitutes at
+import time from mounted env vars. Same Vault secret flows to both sides.
+
+Rotation: `vault kv put kv/forge/oidc/argocd-sre clientSecret=<new>`. Both
+ESO instances refresh within their `refreshInterval` (usually 1h). Both
+sides converge.
+
+### Pattern 2 — Keycloak Operator (CR-driven)
+
+Use the Keycloak Operator (separate from Helm chart). It provides
+`KeycloakRealm`, `KeycloakClient`, `KeycloakUser` CRDs. The operator
+auto-creates a k8s Secret named `keycloak-client-secret-<clientId>`
+holding the generated secret. Consumers reference that Secret.
+
+Trade-off: clean in-cluster, but cross-cluster (ArgoCD on OKD consuming
+a Secret on mgmt-forge) still needs bridging (Replicator, ESO-via-Vault,
+etc). And you're fully committed to the operator ecosystem.
+
+### Pattern 3 — Terraform + kubernetes provider
+
+```hcl
+resource "keycloak_openid_client" "argocd_sre" { ... }
+resource "kubernetes_secret" "argocd_sre_oidc" {
+  data = { clientSecret = keycloak_openid_client.argocd_sre.client_secret }
+}
+```
+
+Terraform state holds the secret; one `apply` creates Keycloak client
+AND k8s Secret atomically. Common in infra-team-runs-TF orgs. Rotation
+= tainted resource + reapply.
+
+### Pattern 4 — Crossplane
+
+Same shape as Terraform but as k8s CRs managed by Crossplane controllers.
+"Kubernetes-native IaC." Providers for Keycloak + Kubernetes both exist
+but the Keycloak provider isn't as mature as Terraform's.
+
+### Pattern 5 — Custom bootstrap Job
+
+Post-install Job that uses Keycloak admin API → creates client → writes
+Secret to both sides. Works, but loses the declarative "reviewable in
+Git" property of the first four.
+
+---
+
+### Recommendation for THIS stack
+
+**Pattern 1** — we already have Vault + ESO on mgmt-forge. Adding a
+keycloak-config-cli sidecar Job under `forge/keycloak/` is a bounded
+piece of work. Concrete design:
+
+```
+forge/keycloak/
+├── Chart.yaml                  (already exists)
+├── values.yaml                 (already exists)
+├── templates/
+│   ├── admin-externalsecret.yaml       (already exists — admin creds from Vault)
+│   ├── db-externalsecret.yaml          (already exists)
+│   ├── argocd-oidc-externalsecret.yaml (NEW — pulls client secret from Vault
+│   │                                     into a Secret in keycloak ns, mounted
+│   │                                     into the config-cli Job as env)
+│   └── keycloak-config-cli-job.yaml    (NEW — runs on Helm hook post-sync;
+│                                         imports realm YAML from configmap
+│                                         below, substituting env vars)
+└── realms/
+    └── forge.yaml                      (NEW — declarative realm: clients,
+                                          users, roles, protocol mappers;
+                                          client secrets are $(env:...))
+```
+
+And on the OKD side:
+```
+argo/sre/forge/argocd-sre-oidc-externalsecret.yaml   (NEW — materializes
+                                                      the same Vault path
+                                                      into argocd-sre ns)
+```
+
+Plus a one-time bootstrap:
+```
+vault kv put kv/forge/oidc/argocd-sre clientSecret=$(openssl rand -hex 16)
+```
+
+### Cross-cluster trust — the asymmetry to watch
+
+ArgoCD runs on OKD; Vault runs on mgmt-forge. For ESO on OKD to read from
+mgmt-forge's Vault over HTTPS:
+
+- Vault's ingress is already reachable from OKD (pfSense routes between
+  the VLANs).
+- Vault needs an **auth method** OKD can use. Options:
+  - **Kubernetes auth**: Vault trusts JWTs issued by OKD's API server.
+    Requires configuring Vault with OKD's JWKS URL + CA + a role tying
+    a specific SA to a policy. One-time Vault config.
+  - **AppRole auth**: OKD bootstraps a role_id + secret_id (stored as a
+    k8s Secret on OKD), ESO uses those to authenticate. Simpler but the
+    initial `secret_id` is itself a bootstrap secret.
+
+Either way, this is a one-time Vault configuration step, done by hand
+or a bootstrap playbook — part of Phase 5 of the estate build.
+
+### Homelab-acceptable shortcut
+
+For now we use the manual flow (kubectl create secret + referenced in
+ArgoCD CR). It proves OIDC works end-to-end. Pattern 1 is the migration
+target, separately tracked.
+
+### Open items to revisit when migrating
+
+- Where does the bootstrap cephx-style "generate the initial Vault
+  secrets once" step live? Likely a standalone playbook invoked during
+  Phase 5 of the estate build, analogous to Vault init + unseal.
+- Keycloak-config-cli handles realm imports; does it handle **updates**
+  idempotently? What about deletions? Currently it supports
+  `IMPORT_FORCE=true` which overwrites unmanaged changes — good for
+  GitOps (drift correction), painful for anyone who edited the realm
+  via UI expecting their changes to stick.
+- How do you rotate the client secret without downtime? Answer: Vault's
+  KV v2 keeps old versions; ESO refreshes to latest; ArgoCD picks up
+  the new Secret on next pod restart; Keycloak accepts both old + new
+  for a grace window (the realm import rotates in a new credential but
+  keeps old active for N minutes). Details depend on keycloak-config-cli
+  version.
