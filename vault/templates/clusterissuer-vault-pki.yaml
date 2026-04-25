@@ -1,0 +1,40 @@
+{{- /*
+ClusterIssuer that lets cert-manager mint TLS certs from Vault's own PKI
+secret engine. The `vault-pki` issuer is what backs the platform's
+"identity + secrets + trust" loop:
+
+  cert-manager ──issue──▶ Vault PKI ──signed by──▶ engatwork.com Root CA
+       │                                                  │
+       └─Certificate resource per Ingress                  │
+                                                          ▼
+                            Root CA cert distributed to every consumer
+                            cluster as `vault-pki-ca` Secret in the
+                            external-secrets namespace, so ESO trusts
+                            the chain when calling vault.apps.mgmt-forge
+                            from outside the forge cluster.
+
+Lives in the vault chart (not cert-manager's) because:
+  - This issuer only makes sense on the cluster that runs Vault, since
+    it talks to Vault over the in-cluster Service URL.
+  - The vault chart already renders only on mgmt-forge (Pattern B
+    selector role=forge). Co-locating keeps the dependency local.
+
+Cert-manager controller authenticates to Vault via the Kubernetes
+auth method, using its own SA in the cert-manager namespace. The
+matching Vault role + policy are configured by
+playbooks/configure_pki.yml (run once after `secrets enable pki`).
+*/}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: vault-pki
+spec:
+  vault:
+    server: {{ .Values.pki.vaultServer | default "http://vault.vault.svc:8200" | quote }}
+    path: {{ .Values.pki.signPath | default "pki/sign/platform-ingress" | quote }}
+    auth:
+      kubernetes:
+        role: {{ .Values.pki.kubernetesAuthRole | default "cert-manager-issuer" | quote }}
+        mountPath: {{ .Values.pki.kubernetesAuthMountPath | default "/v1/auth/kubernetes" | quote }}
+        serviceAccountRef:
+          name: {{ .Values.pki.serviceAccountName | default "cert-manager" | quote }}

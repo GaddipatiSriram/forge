@@ -17,6 +17,19 @@
 #   - UI:  https://vault.apps.mgmt-forge.engatwork.com  (via ingress-nginx)
 #   - API: same URL, token via -H "X-Vault-Token: <token>"
 
+# =============================================================================
+# Wrapper-chart values consumed by templates/ rendered alongside Vault.
+# =============================================================================
+# vault-pki ClusterIssuer (templates/clusterissuer-vault-pki.yaml). Override
+# any of these per cluster if Vault ever ends up in a different namespace,
+# auth path, or PKI role. Defaults match the live mgmt-forge install.
+pki:
+  vaultServer: "http://vault.vault.svc:8200"
+  signPath: "pki/sign/platform-ingress"
+  kubernetesAuthRole: "cert-manager-issuer"
+  kubernetesAuthMountPath: "/v1/auth/kubernetes"
+  serviceAccountName: "cert-manager"
+
 vault:
   global:
     tlsDisable: true   # TLS terminated at ingress-nginx; internal pod-to-pod is cleartext
@@ -79,20 +92,31 @@ vault:
         cpu: 500m
         memory: 512Mi
 
-    # Ingress via ingress-nginx
+    # ----------------------------------------------------------------
+    # Ingress via ingress-nginx, TLS issued by cert-manager via the
+    # vault-pki ClusterIssuer (Vault's own PKI engine — see
+    # forge/README.md "Identity + Secrets + Trust" for the loop).
+    # cert-manager watches this Ingress, creates a Certificate keyed off
+    # the cert-manager.io/cluster-issuer annotation + tls[].secretName,
+    # and writes the resulting cert/key to the named Secret. ingress-nginx
+    # then serves Vault's host with our PKI-signed cert instead of the
+    # default self-signed one. That's the prerequisite for cross-cluster
+    # ESO (mgmt-observability, dev-*) trusting Vault's API endpoint.
     ingress:
       enabled: true
       ingressClassName: nginx
       annotations:
         nginx.ingress.kubernetes.io/backend-protocol: HTTP
         nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        cert-manager.io/cluster-issuer: vault-pki
       hosts:
         - host: vault.apps.mgmt-forge.engatwork.com
           paths:
             - /
-      # TLS via cert-manager Certificate (wave 2 — for now ingress-nginx's default
-      # self-signed cert serves; we'll add a cert-manager annotation later).
-      tls: []
+      tls:
+        - hosts:
+            - vault.apps.mgmt-forge.engatwork.com
+          secretName: vault-tls
 
     # Readiness/liveness — Vault returns 429 when sealed, 200 when active.
     # Use standby-ok so non-leaders also pass liveness.
