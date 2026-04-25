@@ -69,6 +69,12 @@ forgeSmokeTest:
 #   - ArgoCD reconciles every consumer cluster's ClusterSecretStore.
 vault:
   serverUrl: "https://vault.apps.mgmt-forge.engatwork.com"
+  # Per-cluster Kubernetes auth method mount name. The Vault auth method
+  # is multi-mounted (one mount per cluster) so each cluster's TokenReview
+  # validates against that cluster's own kube-apiserver. The
+  # external-secrets ApplicationSet passes `kubernetes-{{name}}` here for
+  # every cluster; the chart default is for direct/standalone testing.
+  kubernetesAuthMount: "kubernetes-mgmt-forge"
   caBundle: |
     -----BEGIN CERTIFICATE-----
     MIIFMTCCAxmgAwIBAgIUb/irHt72XajogGWAm+OI63lKxMcwDQYJKoZIhvcNAQEL
