@@ -53,3 +53,50 @@ forgeSmokeTest:
   # kv/forge/hello from Vault. Useful for verifying the ESO → Vault loop after
   # initial deploy. Delete the value + re-sync once verified.
   enabled: true
+
+# ClusterSecretStore (templates/cluster-secret-store.yaml) connection settings.
+#
+# We hit Vault via its public ingress hostname, NOT the in-cluster Service URL.
+# That's the only reachable endpoint from the workload clusters this chart now
+# deploys to (mgmt-observability, future dev-*) — and it works for mgmt-forge
+# too, just one extra hop through ingress-nginx.
+#
+# TLS verification uses the engatwork.com Root CA from Vault's PKI engine.
+# The CA cert is checked into git (CA certs aren't secrets) so every cluster
+# trusts it consistently and the bootstrap stays fully GitOps. Rotate by:
+#   - Re-keying the root in Vault (vault write pki/root/rotate/internal …)
+#   - Pasting the new PEM in here + bumping the chart version
+#   - ArgoCD reconciles every consumer cluster's ClusterSecretStore.
+vault:
+  serverUrl: "https://vault.apps.mgmt-forge.engatwork.com"
+  caBundle: |
+    -----BEGIN CERTIFICATE-----
+    MIIFMTCCAxmgAwIBAgIUb/irHt72XajogGWAm+OI63lKxMcwDQYJKoZIhvcNAQEL
+    BQAwIDEeMBwGA1UEAxMVZW5nYXR3b3JrLmNvbSBSb290IENBMB4XDTI2MDQyNTIy
+    MDMwOVoXDTM2MDQyMjIyMDMzMFowIDEeMBwGA1UEAxMVZW5nYXR3b3JrLmNvbSBS
+    b290IENBMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAuWgb2PSWkG77
+    QT9P2U4Qgc6rGSC5YcfkRiODD1asXhjr+P68dtC8K55Os/FMpcbWjPOE9s2GClyh
+    fdABA43qdgC+4tiTZ7DhCMNmOt6CnhnFPa2yE/nh2ugmERSvkt8WzI58rTaizUzg
+    m8aHpkgtaJjWgRoVGrkclYu5rbwAkA0aNfgKxIdEbZqPfDb+pyw90cYau24+OKGa
+    aFwNFcQiJXEAubhqjXs7ML6MDiwT6sa+LSHQez7DwkVlv08ZeINGyVhdnrrPywf8
+    jAI0NHbuOdaxTrBexYGYGiTcRBL693fWNP8EfyMsAejge9U1uTCKtGehDu/MjLb8
+    YlaST43hmDazAgylkGSL8Dwxlh6Tmfks9/QMLP3zqVSuU0F0vuMziZqQCjELDVDZ
+    TBwPVl+f1LbGCVecDSm/+w0HFTSmr94pQ6tNF7y+g3iTFxCTkBbX+HE8nSLOj9XO
+    +WUFd703C/NrT7X+2YcBNVCI3S5mT7EOWvQdmHZUloGAHxs2CQoYNYb9vPKLEtMK
+    5YcLoNlc6kRenqOVYrLPke++sL3yLO41kxtlSdHm5C6+HCKWPKjb96Ed4AZJDiCP
+    BeHE7jERRNRRDIQK4mizwQ/OEu8QxgPIOSjM3ApWJhGpdMyDtrMerWzoLgMH0EKk
+    ExrkNFPXhg5XT6yToAjtNHThFQn6/Q0CAwEAAaNjMGEwDgYDVR0PAQH/BAQDAgEG
+    MA8GA1UdEwEB/wQFMAMBAf8wHQYDVR0OBBYEFJIgQSDImGBpTXgyXcs1frDg9Zdi
+    MB8GA1UdIwQYMBaAFJIgQSDImGBpTXgyXcs1frDg9ZdiMA0GCSqGSIb3DQEBCwUA
+    A4ICAQAtz3s3PkWvyq/ujRfrqPzoNxn/iavCxft1kl/6qgq1GVwg9tayx2RHdrNr
+    RqaqB3xaM3v/2JLmBFyR/J8uNRXPCMu55iDV3IQIbFoMJrIdlGrzrszccN2UYUR8
+    3eQdOplVmc2Q10Vb0O/nv+0VoRy1ahOtPexWK2HWWLsNYD2+lG0ZGTzW3fbV+JBE
+    c78C1EfUXSv6HhfEC8zskN19zR/6bEps+6rSlTrSgF39qhKlz7l0Kv/a4t15V54b
+    VAijJwM6wkfNMmFWfc6c+hv2xzc7ukc75/Mmm+R/i4TZ8KEAZOY1ZUqJpG5FFt3T
+    5qfmpVxeSHUKvjalh5koiM+NRlasBd4L1LFdo5DECZfgcGpsNdXI2Oygc0Dcl2oC
+    3tamzFwq8xzRz5XCBLtXSRS2OwLAlcTT9Fl0VQR5Re6VYeRb84Pht+oBuU02icXY
+    XvI2WJf0NokDL1qFhBWWecD2BS+odSSr/bN7ScoZc0dR7euKqWzxk/qZwaJaJAM/
+    njx4e2YlFek/0+h0wFjMqzY7iB8f8bmcNOKZaib79vdmtO9k9ubfmkdQvytAVGr/
+    +9vlXLd1qUxSa0ORxrsCSAmnfA7UQFjuiTBVSDKXgN6fbNGgkkZkEB8oxMaLy3J/
+    jDkdBG0JvTai0H8yJyYs8lSsnninELGxHWqpUZezr/m+6YdWiw==
+    -----END CERTIFICATE-----
