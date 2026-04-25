@@ -149,22 +149,6 @@ Lives in the `cluster` repo, but flagging here so it doesn't get lost.
 
 ---
 
-## Delete stale `argo/sre/mgmt-observability/cluster-secret.yaml`
-
-**Status: cosmetic.**
-
-After the mgmt-observability rebuild, Phase 8 of `bootstrap-k8s.yml`
-generated and applied a fresh `argocd-sre/mgmt-observability` Secret
-with a current SA token. The file
-`argo/sre/mgmt-observability/cluster-secret.yaml` carries an outdated
-token that's no longer applied anywhere — it was a manual-bootstrap
-artifact from before the cluster was Phase-8-registered. Delete it from
-the argo repo so future readers don't think it's authoritative.
-
-Lives in the `argo` repo, flagging here for cross-reference.
-
----
-
 ## Author observability backends (Prometheus / Alertmanager / Grafana)
 
 **Status: this was the original goal that triggered everything in the
